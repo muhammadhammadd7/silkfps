@@ -45,6 +45,7 @@ Auto-detects Vulkan/Skia on Android and Metal/ProMotion on iOS. Includes real-ti
 | FPS analytics | ❌ | ✅ |
 | Device info | ❌ | ✅ |
 | One-line initialize | ❌ | ✅ |
+| Surface.setFrameRate() | ❌ | ✅ |
 
 ---
 
@@ -52,10 +53,25 @@ Auto-detects Vulkan/Skia on Android and Metal/ProMotion on iOS. Includes real-ti
 
 | Platform | Support |
 |---|---|
-| Android (Snapdragon) | ✅ Full — Vulkan + 90/120/144Hz |
-| Android (MediaTek) | ✅ Partial — Skia fallback |
+| Android (Snapdragon/Vulkan) | ✅ Full — Vulkan + 90/120/144Hz |
+| Android (OpenGLES/Impeller) | ✅ Surface.setFrameRate() fallback |
+| Android (MediaTek) | ✅ Skia fallback |
 | iOS (ProMotion) | ✅ Full — Metal + 120Hz |
 | iOS (Standard) | ✅ 60Hz |
+
+---
+
+## 🔧 How It Works — 3-Level Approach
+
+SilkFPS uses a 3-level strategy to ensure maximum compatibility across all Android devices:
+
+| Level | API | Devices |
+|---|---|---|
+| **Level 1** — `preferredDisplayModeId` | Android 6+ (API 23+) | All devices |
+| **Level 2** — `Surface.setFrameRate()` | Android 11+ (API 30+) | OpenGLES + Vulkan |
+| **Level 3** — `frameRateBoostOnTouchEnabled` | Android 14+ (API 34+) | Modern flagships |
+
+> `Surface.setFrameRate()` works **outside the Flutter engine renderer** — it communicates directly with SurfaceFlinger. This is the same approach used by Binance, MEXC, and other major production apps to achieve stable high refresh rates regardless of whether the device uses Vulkan or OpenGLES.
 
 ---
 
@@ -65,10 +81,35 @@ Auto-detects Vulkan/Skia on Android and Metal/ProMotion on iOS. Includes real-ti
 
 ```yaml
 dependencies:
-  silkfps: ^0.0.1
+  silkfps: ^0.0.2
 ```
 
-### 2. Android — Update `MainActivity.kt`
+### 2. Android — Update `build.gradle.kts`
+
+> ⚠️ **Important:** Update your app's `build.gradle.kts` for best compatibility.
+
+```kotlin
+// android/app/build.gradle.kts
+android {
+    compileSdk = 36
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = JavaVersion.VERSION_17.toString()
+    }
+
+    defaultConfig {
+        targetSdk = 36
+        // ... rest of your config
+    }
+}
+```
+
+### 3. Android — Update `MainActivity.kt`
 
 > ⚠️ **Important:** This step is required. After adding the plugin, you must update your app's `MainActivity.kt`.
 
@@ -78,12 +119,19 @@ package your.package.name
 
 import io.flutter.embedding.android.FlutterActivity
 import android.os.Bundle
-import android.content.pm.PackageManager
 
 class MainActivity : FlutterActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setOptimalRefreshRate()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Re-apply on every resume — prevents OS from resetting to 60Hz
+        setOptimalRefreshRate()
+        window.decorView.postDelayed({ setOptimalRefreshRate() }, 300)
+        window.decorView.postDelayed({ setOptimalRefreshRate() }, 800)
     }
 
     private fun setOptimalRefreshRate() {
@@ -113,7 +161,7 @@ class MainActivity : FlutterActivity() {
 }
 ```
 
-### 3. Android — Update `AndroidManifest.xml`
+### 4. Android — Update `AndroidManifest.xml`
 
 ```xml
 <application ...>
@@ -125,7 +173,7 @@ class MainActivity : FlutterActivity() {
 </application>
 ```
 
-### 4. iOS — Update `Info.plist`
+### 5. iOS — Update `Info.plist`
 
 ```xml
 <!-- Enable ProMotion 120fps on iPhone 13 Pro and above -->
@@ -133,7 +181,7 @@ class MainActivity : FlutterActivity() {
 <true/>
 ```
 
-### 5. `main.dart` — Initialize
+### 6. `main.dart` — Initialize
 
 ```dart
 import 'package:silkfps/silkfps.dart';
@@ -152,7 +200,7 @@ void main() async {
 }
 ```
 
-### 6. Wrap your app — FPS Overlay
+### 7. Wrap your app — FPS Overlay
 
 ```dart
 class MyApp extends StatelessWidget {
@@ -162,7 +210,7 @@ class MyApp extends StatelessWidget {
       home: SilkFpsOverlay(
         show: SilkFps.showFpsOverlay,
         position: SilkOverlayPosition.topRight,
-        setHz: 90, // The refresh rate you have set
+        setHz: 90,
         child: const MyHomePage(),
       ),
     );
@@ -323,7 +371,6 @@ import 'package:silkfps/silkfps.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Per-route FPS configuration
   SilkAdaptive.setFpsForRoute('/home', 90);
   SilkAdaptive.setFpsForRoute('/settings', 60);
 
@@ -357,9 +404,9 @@ class MyApp extends StatelessWidget {
 
 ## ⚠️ Known Limitations
 
-- **MediaTek devices** — Some MediaTek chipsets (e.g. Helio G90T) may experience OS-level refresh rate drops when idle. This is an Android OS adaptive behavior, not a plugin limitation.
 - **iOS** — Custom refresh rate selection is not supported. iOS automatically manages ProMotion.
-- **Comparison with `flutter_displaymode`** — Unlike `flutter_displaymode` which is Android-only, SilkFPS supports both platforms with additional features.
+- **Android idle behavior** — Some devices drop to 60Hz when the screen is idle to save battery. This is normal Android OS adaptive behavior — the refresh rate boosts back immediately on touch/scroll.
+- **Comparison with `flutter_displaymode`** — Unlike `flutter_displaymode` which is Android-only and uses a single API, SilkFPS supports both platforms with a 3-level approach for maximum device compatibility.
 
 ---
 
@@ -405,7 +452,7 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## 📬 Issues
 
-Found a bug? Please open an issue on [GitHub](https://github.com/yourusername/silkfps/issues).
+Found a bug? Please open an issue on [GitHub](https://github.com/muhammadhammad7/silkfps/issues).
 
 ---
 

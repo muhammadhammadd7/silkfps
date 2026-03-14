@@ -15,6 +15,7 @@ import android.content.pm.PackageManager
 import android.hardware.display.DisplayManager
 import android.os.BatteryManager
 import android.view.Display
+import android.view.Surface
 
 class SilkfpsPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
 
@@ -76,7 +77,6 @@ class SilkfpsPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
             "getCurrentRefreshRate" -> {
                 try {
                     val ctx = context ?: return result.error("NO_CONTEXT", "Context not available", null)
-                    // Get actual refresh rate from DisplayManager — not from window
                     result.success(getActualRefreshRate(ctx))
                 } catch (e: Exception) {
                     result.error("ERROR", e.message, null)
@@ -152,13 +152,46 @@ class SilkfpsPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                 .maxByOrNull { it.refreshRate }
 
             optimalMode?.let {
+                // Level 1 — preferredDisplayModeId (API 23+) — all devices
                 val params = act.window.attributes
                 params.preferredDisplayModeId = it.modeId
                 act.window.attributes = params
-            }
 
-            if (android.os.Build.VERSION.SDK_INT >= 34) {
-                act.window.frameRateBoostOnTouchEnabled = true
+                // Level 2 — Surface.setFrameRate() (API 30+)
+                // This bypasses Flutter engine renderer — works on OpenGLES devices too
+                // Same approach used by Binance, MEXC, and other production apps
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                    try {
+                        act.window.peekDecorView()?.rootSurface?.setFrameRate(
+                            it.refreshRate,
+                            Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE,
+                            Surface.CHANGE_FRAME_RATE_ALWAYS
+                        )
+                    } catch (_: Exception) {}
+
+                    // Also apply on decorView surface directly
+                    act.window.decorView.postDelayed({
+                        try {
+                            act.window.peekDecorView()?.rootSurface?.setFrameRate(
+                                it.refreshRate,
+                                Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE,
+                                Surface.CHANGE_FRAME_RATE_ALWAYS
+                            )
+                        } catch (_: Exception) {}
+                    }, 500)
+                }
+
+                // Level 3 — Android 14+ touch boost
+                if (android.os.Build.VERSION.SDK_INT >= 34) {
+                    act.window.frameRateBoostOnTouchEnabled = true
+                }
+
+                android.util.Log.d(
+                    "SilkFPS",
+                    "Target: ${it.refreshRate}Hz | " +
+                    "API: ${android.os.Build.VERSION.SDK_INT} | " +
+                    "SurfaceAPI: ${android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R}"
+                )
             }
         }
     }
@@ -175,9 +208,21 @@ class SilkfpsPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                 .minByOrNull { Math.abs(it.refreshRate - targetRate) }
 
             targetMode?.let {
+                // Level 1 — preferredDisplayModeId
                 val params = act.window.attributes
                 params.preferredDisplayModeId = it.modeId
                 act.window.attributes = params
+
+                // Level 2 — Surface.setFrameRate() (API 30+)
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                    try {
+                        act.window.peekDecorView()?.rootSurface?.setFrameRate(
+                            targetRate,
+                            Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE,
+                            Surface.CHANGE_FRAME_RATE_ALWAYS
+                        )
+                    } catch (_: Exception) {}
+                }
             }
         }
     }
