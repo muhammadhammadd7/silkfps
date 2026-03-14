@@ -14,6 +14,7 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.hardware.display.DisplayManager
 import android.os.BatteryManager
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.view.Display
@@ -30,11 +31,18 @@ class SilkfpsPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
 
     companion object {
         private const val TAG = "SilkFPS"
+
+        // Minimum supported API — Android 11
+        private const val MIN_SUPPORTED_API = Build.VERSION_CODES.R // API 30
+
+        // API levels for strategy decision
+        private const val API_SKIA_MAX = Build.VERSION_CODES.S_V2  // API 32 — use Skia approach
+        private const val API_IMPELLER_MIN = Build.VERSION_CODES.TIRAMISU // API 33 — Impeller stable
     }
 
     // ─────────────────────────────────────────────────────────
     // DisplayListener — fires instantly when OS changes rate
-    // No polling, no battery waste — event-driven
+    // Event-driven, zero battery waste, no polling
     // ─────────────────────────────────────────────────────────
     private val displayListener = object : DisplayManager.DisplayListener {
         override fun onDisplayChanged(displayId: Int) {
@@ -57,25 +65,28 @@ class SilkfpsPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
         channel.setMethodCallHandler(this)
         context = binding.applicationContext
         displayManager = context?.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
-        android.util.Log.d(TAG, "Plugin attached ✓")
+        android.util.Log.d(TAG, "Plugin attached ✓ | API: ${Build.VERSION.SDK_INT} | Strategy: ${getRendererStrategy()}")
     }
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
         activity = binding.activity
-        // Register DisplayListener — starts watching for OS rate changes
-        displayManager?.registerDisplayListener(displayListener, mainHandler)
-        android.util.Log.d(TAG, "Activity attached + DisplayListener registered ✓")
+        if (Build.VERSION.SDK_INT >= MIN_SUPPORTED_API) {
+            displayManager?.registerDisplayListener(displayListener, mainHandler)
+            android.util.Log.d(TAG, "DisplayListener registered ✓")
+        }
     }
 
     override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
         activity = binding.activity
-        displayManager?.registerDisplayListener(displayListener, mainHandler)
+        if (Build.VERSION.SDK_INT >= MIN_SUPPORTED_API) {
+            displayManager?.registerDisplayListener(displayListener, mainHandler)
+        }
     }
 
     override fun onDetachedFromActivity() {
         displayManager?.unregisterDisplayListener(displayListener)
         activity = null
-        android.util.Log.d(TAG, "Activity detached + DisplayListener unregistered")
+        android.util.Log.d(TAG, "DisplayListener unregistered")
     }
 
     override fun onDetachedFromActivityForConfigChanges() {
@@ -85,13 +96,27 @@ class SilkfpsPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
 
     override fun onMethodCall(call: MethodCall, result: Result) {
         android.util.Log.d(TAG, "Method: ${call.method}")
+
+        // API 30 (Android 11) se kam → not supported
+        if (Build.VERSION.SDK_INT < MIN_SUPPORTED_API) {
+            android.util.Log.w(TAG, "API ${Build.VERSION.SDK_INT} < 30 — not supported")
+            when (call.method) {
+                "getCurrentRefreshRate", "getSupportedRefreshRates",
+                "isVulkanSupported", "getBatteryLevel", "getDeviceInfo" -> { /* continue */ }
+                else -> {
+                    result.error("API_NOT_SUPPORTED", "SilkFPS requires Android 11 (API 30) or higher", null)
+                    return
+                }
+            }
+        }
+
         when (call.method) {
 
             "setHighRefreshRate" -> {
                 try {
                     val act = activity ?: return result.error("NO_ACTIVITY", "Activity not available", null)
                     targetRefreshRate = getMaxRefreshRate(act).toFloat()
-                    android.util.Log.d(TAG, "setHighRefreshRate → target=${targetRefreshRate}Hz")
+                    android.util.Log.d(TAG, "setHighRefreshRate → target=${targetRefreshRate}Hz | strategy=${getRendererStrategy()}")
                     applyPreferredMode(act, targetRefreshRate)
                     result.success(true)
                 } catch (e: Exception) {
@@ -154,16 +179,18 @@ class SilkfpsPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                     val act = activity ?: return result.error("NO_ACTIVITY", "Activity not available", null)
                     val ctx = context ?: return result.error("NO_CONTEXT", "Context not available", null)
                     val info = mapOf(
-                        "manufacturer" to android.os.Build.MANUFACTURER,
-                        "model" to android.os.Build.MODEL,
-                        "androidVersion" to android.os.Build.VERSION.RELEASE,
-                        "apiLevel" to android.os.Build.VERSION.SDK_INT,
+                        "manufacturer" to Build.MANUFACTURER,
+                        "model" to Build.MODEL,
+                        "androidVersion" to Build.VERSION.RELEASE,
+                        "apiLevel" to Build.VERSION.SDK_INT,
                         "isVulkanSupported" to isVulkanSupported(act),
                         "isMetalSupported" to false,
                         "maxRefreshRate" to getMaxRefreshRate(act),
                         "currentRefreshRate" to getActualRefreshRate(ctx),
                         "supportedRefreshRates" to getSupportedRefreshRates(act),
-                        "batteryLevel" to getBatteryLevel(ctx)
+                        "batteryLevel" to getBatteryLevel(ctx),
+                        "rendererStrategy" to getRendererStrategy(),
+                        "isHighRefreshRateSupported" to (Build.VERSION.SDK_INT >= MIN_SUPPORTED_API)
                     )
                     android.util.Log.d(TAG, "getDeviceInfo → $info")
                     result.success(info)
@@ -177,12 +204,26 @@ class SilkfpsPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
     }
 
     // ─────────────────────────────────────────────────────────
-    // CORE — Set preferredDisplayModeId
-    // This is all flutter_displaymode does too — clean & proven
-    // Works on 60Hz, 90Hz, 120Hz, 144Hz devices automatically
+    // RENDERER STRATEGY
+    // API 30-32 (Android 11-12L) → Skia — preferredDisplayModeId
+    // API 33+   (Android 13+)    → Impeller/Vulkan — preferredDisplayModeId
+    // Both use same API — but strategy info helps dart side decide
+    // ─────────────────────────────────────────────────────────
+    private fun getRendererStrategy(): String {
+        return when {
+            Build.VERSION.SDK_INT < MIN_SUPPORTED_API -> "NOT_SUPPORTED"
+            Build.VERSION.SDK_INT <= API_SKIA_MAX -> "SKIA" // API 30-32
+            else -> "IMPELLER" // API 33+
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────
+    // CORE — preferredDisplayModeId
+    // Works on both Skia (API 30-32) and Impeller (API 33+)
+    // Auto-detects: 60Hz, 90Hz, 120Hz, 144Hz
     // ─────────────────────────────────────────────────────────
     private fun applyPreferredMode(act: Activity, targetRate: Float) {
-        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.M) return
+        if (Build.VERSION.SDK_INT < MIN_SUPPORTED_API) return
         try {
             val display = act.windowManager.defaultDisplay
             val currentMode = display.mode
@@ -191,7 +232,6 @@ class SilkfpsPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                 it.physicalHeight == currentMode.physicalHeight
             }
 
-            // Find the mode closest to target rate
             val targetMode = if (targetRate >= getMaxRefreshRate(act).toFloat() - 1f) {
                 supportedModes.maxByOrNull { it.refreshRate }
             } else {
@@ -204,11 +244,11 @@ class SilkfpsPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                 act.window.attributes = params
 
                 // Android 14+ touch boost
-                if (android.os.Build.VERSION.SDK_INT >= 34) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                     act.window.frameRateBoostOnTouchEnabled = true
                 }
 
-                android.util.Log.d(TAG, "Applied → modeId=${mode.modeId} | ${mode.refreshRate}Hz ✓")
+                android.util.Log.d(TAG, "Applied → ${mode.refreshRate}Hz | modeId=${mode.modeId} | strategy=${getRendererStrategy()} ✓")
             }
         } catch (e: Exception) {
             android.util.Log.e(TAG, "applyPreferredMode error: ${e.message}")
@@ -221,7 +261,7 @@ class SilkfpsPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
 
     private fun getActualRefreshRate(ctx: Context): Double {
         return try {
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 val dm = ctx.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
                 dm.getDisplay(Display.DEFAULT_DISPLAY)?.mode?.refreshRate?.toDouble() ?: 60.0
             } else 60.0
@@ -229,7 +269,7 @@ class SilkfpsPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
     }
 
     private fun getSupportedRefreshRates(act: Activity): List<Double> {
-        return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             val display = act.windowManager.defaultDisplay
             val currentMode = display.mode
             display.supportedModes

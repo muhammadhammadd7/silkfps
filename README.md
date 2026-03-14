@@ -36,6 +36,7 @@ Auto-detects the highest supported refresh rate on Android (Vulkan/Skia) and iOS
 | High refresh rate | ✅ Android only | ✅ Android + iOS |
 | Auto device detection | ❌ | ✅ 60/90/120/144Hz |
 | DisplayManager.DisplayListener | ❌ | ✅ |
+| Renderer strategy detection | ❌ | ✅ SKIA / IMPELLER |
 | Vulkan auto-detect | ❌ | ✅ |
 | iOS Metal/ProMotion | ❌ | ✅ |
 | Real-time FPS stream | ❌ | ✅ |
@@ -54,10 +55,11 @@ Auto-detects the highest supported refresh rate on Android (Vulkan/Skia) and iOS
 
 | Platform | Support |
 |---|---|
-| Android 60Hz devices | ✅ Auto-detected — stays at 60Hz |
-| Android 90Hz devices | ✅ Auto-detected — boosts to 90Hz |
-| Android 120Hz devices | ✅ Auto-detected — boosts to 120Hz |
-| Android 144Hz devices | ✅ Auto-detected — boosts to 144Hz |
+| Android 60Hz devices (API 30+) | ✅ Auto-detected |
+| Android 90Hz devices (API 30+) | ✅ Auto-detected |
+| Android 120Hz devices (API 30+) | ✅ Auto-detected |
+| Android 144Hz devices (API 30+) | ✅ Auto-detected |
+| Android 10 and below (API < 30) | ⚠️ Not supported — skips silently |
 | iOS (ProMotion 120Hz) | ✅ Full — Metal + ProMotion |
 | iOS (Standard 60Hz) | ✅ 60Hz |
 
@@ -65,19 +67,24 @@ Auto-detects the highest supported refresh rate on Android (Vulkan/Skia) and iOS
 
 ## 🔧 How It Works
 
-SilkFPS uses `preferredDisplayModeId` + `DisplayManager.DisplayListener` for a clean, event-driven approach:
+SilkFPS uses `preferredDisplayModeId` + `DisplayManager.DisplayListener` with automatic renderer strategy detection:
 
-1. **On app start** — detects the device's maximum supported refresh rate automatically
-2. **Sets `preferredDisplayModeId`** — tells the OS to use the highest available mode
-3. **Registers `DisplayListener`** — monitors for any OS-level rate changes in real time
-4. **If OS overrides** — listener fires instantly and re-applies the target rate
+| Android Version | API | Strategy | Renderer |
+|---|---|---|---|
+| Android 10 and below | < 30 | Not supported | — |
+| Android 11 - 12L | 30 - 32 | SKIA | Skia + Vulkan/OpenGLES |
+| Android 13+ | 33+ | IMPELLER | Impeller + Vulkan/OpenGLES |
+| iOS | — | Metal | Metal + ProMotion |
 
+**Flow:**
 ```
-App launch → detect max rate (60/90/120/144Hz) → set preferredDisplayModeId
-OS changes rate → DisplayListener fires instantly → re-apply target rate ✅
+App launch → detect API level → select strategy
+         → detect max rate (60/90/120/144Hz)
+         → set preferredDisplayModeId
+OS changes rate → DisplayListener fires instantly → re-apply ✅
 ```
 
-> This is an event-driven approach — zero polling, zero battery waste. The listener unregisters automatically when the activity detaches.
+> Event-driven approach — zero polling, zero battery waste.
 
 ---
 
@@ -87,13 +94,12 @@ OS changes rate → DisplayListener fires instantly → re-apply target rate ✅
 
 ```yaml
 dependencies:
-  silkfps: ^0.0.3
+  silkfps: ^0.0.4
 ```
 
 ### 2. Android — Update `build.gradle.kts`
 
 ```kotlin
-// android/app/build.gradle.kts
 android {
     compileSdk = 36
 
@@ -108,17 +114,13 @@ android {
 
     defaultConfig {
         targetSdk = 36
-        // ... rest of your config
     }
 }
 ```
 
 ### 3. Android — Update `MainActivity.kt`
 
-> ⚠️ **Important:** This step is required.
-
 ```kotlin
-// android/app/src/main/kotlin/your/package/MainActivity.kt
 package your.package.name
 
 import io.flutter.embedding.android.FlutterActivity
@@ -166,7 +168,6 @@ class MainActivity : FlutterActivity() {
 
 ```xml
 <application ...>
-    <!-- SilkFPS — Vulkan on supported devices, Skia fallback on others -->
     <meta-data
         android:name="io.flutter.embedding.android.EnableVulkan"
         android:value="true" />
@@ -177,7 +178,6 @@ class MainActivity : FlutterActivity() {
 ### 5. iOS — Update `Info.plist`
 
 ```xml
-<!-- Enable ProMotion 120fps on iPhone 13 Pro and above -->
 <key>CADisableMinimumFrameDurationOnPhone</key>
 <true/>
 ```
@@ -190,11 +190,10 @@ import 'package:silkfps/silkfps.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // ✅ One line — everything is automatic!
   await SilkFps.initialize(
-    showFpsOverlay: true,       // Live FPS badge in the corner
-    enableBatterySaver: true,   // Auto switch to 60fps on low battery
-    batterySaverThreshold: 20,  // Switch at 20% battery
+    showFpsOverlay: true,
+    enableBatterySaver: true,
+    batterySaverThreshold: 20,
   );
 
   runApp(const MyApp());
@@ -244,7 +243,6 @@ double hz = await SilkFps.getCurrentRefreshRate();
 
 // Get all supported refresh rates
 List<double> rates = await SilkFps.getSupportedRefreshRates();
-// Returns: [45.0, 60.0, 90.0]
 
 // Check Vulkan support (Android only)
 bool vulkan = await SilkFps.isVulkanSupported();
@@ -254,12 +252,32 @@ int battery = await SilkFps.getBatteryLevel();
 
 // Get device info
 SilkDeviceInfo info = await SilkFps.getDeviceInfo();
-print(info.manufacturer);           // realme
-print(info.model);                  // RMX2001
-print(info.renderer);               // Vulkan / Skia / Metal
-print(info.maxRefreshRate);         // 90.0
-print(info.isProMotion);            // false
-print(info.supportedRefreshRates);  // [45.0, 60.0, 90.0]
+
+// New in 0.0.4
+print(SilkFps.rendererStrategy);          // "SKIA" / "IMPELLER" / "NOT_SUPPORTED"
+print(SilkFps.isHighRefreshRateSupported); // true / false
+```
+
+---
+
+### `SilkDeviceInfo` — Device Information Model
+
+```dart
+SilkDeviceInfo info = await SilkFps.getDeviceInfo();
+
+info.manufacturer              // "realme", "Samsung", "Apple"
+info.model                     // "RMX2001", "S24", "iPhone 15 Pro"
+info.osVersion                 // "11", "14", "17.0"
+info.apiLevel                  // 30 (Android only)
+info.isVulkanSupported         // true/false (Android)
+info.isMetalSupported          // true/false (iOS)
+info.isProMotion               // true if 120Hz+ (iPhone 13 Pro+)
+info.maxRefreshRate            // 90.0, 120.0, 144.0
+info.currentRefreshRate        // Current Hz
+info.supportedRefreshRates     // [60.0, 90.0]
+info.renderer                  // "Vulkan", "Skia", "Metal"
+info.rendererStrategy          // "SKIA", "IMPELLER", "NOT_SUPPORTED", "Metal"
+info.isHighRefreshRateSupported // true if Android 11+ or iOS
 ```
 
 ---
@@ -267,26 +285,11 @@ print(info.supportedRefreshRates);  // [45.0, 60.0, 90.0]
 ### `SilkFpsMonitor` — Real-time FPS Stream
 
 ```dart
-class MyWidget extends StatefulWidget { ... }
-
-class _MyWidgetState extends State<MyWidget>
-    with TickerProviderStateMixin {
-
-  @override
-  void initState() {
-    super.initState();
-    SilkFpsMonitor.start(this);
-    SilkFpsMonitor.fpsStream.listen((fps) {
-      print('Live FPS: $fps');
-    });
-  }
-
-  @override
-  void dispose() {
-    SilkFpsMonitor.stop();
-    super.dispose();
-  }
-}
+SilkFpsMonitor.start(this);
+SilkFpsMonitor.fpsStream.listen((fps) {
+  print('Live FPS: $fps');
+});
+SilkFpsMonitor.stop();
 ```
 
 ---
@@ -302,63 +305,18 @@ SilkFpsOverlay(
 )
 ```
 
-**Available Positions:**
-- `SilkOverlayPosition.topLeft`
-- `SilkOverlayPosition.topRight`
-- `SilkOverlayPosition.bottomLeft`
-- `SilkOverlayPosition.bottomRight`
-
 ---
 
 ### `SilkAdaptive` — Smart FPS Management
 
 ```dart
-// Battery Saver — auto switch to 60fps on low battery
 await SilkAdaptive.enableBatterySaver(threshold: 20);
-SilkAdaptive.disableBatterySaver();
-
-// Adaptive Scroll — high FPS while scrolling, low FPS when idle
 await SilkAdaptive.enableAdaptiveMode();
 await SilkAdaptive.onScrollStart();
 await SilkAdaptive.onScrollEnd();
-SilkAdaptive.disableAdaptiveMode();
-
-// Lifecycle Aware — 60fps in background, 90fps in foreground
-SilkAdaptive.enableLifecycleAware(context);
-SilkAdaptive.disableLifecycleAware();
-
-// Per-Route FPS — different FPS for different screens
 SilkAdaptive.setFpsForRoute('/home', 90);
 SilkAdaptive.setFpsForRoute('/video', 120);
 SilkAdaptive.setFpsForRoute('/settings', 60);
-
-// Analytics
-SilkAdaptive.recordFps(fps);
-double avg = SilkAdaptive.getAverageFps();
-double min = SilkAdaptive.getMinFps();
-double max = SilkAdaptive.getMaxFps();
-List<double> history = SilkAdaptive.getFpsHistory();
-SilkAdaptive.clearHistory();
-```
-
----
-
-### `SilkDeviceInfo` — Device Information Model
-
-```dart
-SilkDeviceInfo info = await SilkFps.getDeviceInfo();
-
-info.manufacturer           // "realme", "Samsung", "Apple"
-info.model                  // "RMX2001", "S24", "iPhone 15 Pro"
-info.osVersion              // "11", "14", "17.0"
-info.apiLevel               // 30 (Android only)
-info.isVulkanSupported      // true/false (Android)
-info.isMetalSupported       // true/false (iOS)
-info.isProMotion            // true if 120Hz+ (iPhone 13 Pro+)
-info.maxRefreshRate         // 90.0, 120.0, 144.0
-info.currentRefreshRate     // Current Hz
-info.supportedRefreshRates  // [60.0, 90.0]
-info.renderer               // "Vulkan", "Skia", "Metal"
 ```
 
 ---
@@ -371,9 +329,6 @@ import 'package:silkfps/silkfps.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
-  SilkAdaptive.setFpsForRoute('/home', 90);
-  SilkAdaptive.setFpsForRoute('/settings', 60);
 
   await SilkFps.initialize(
     showFpsOverlay: true,
@@ -405,9 +360,9 @@ class MyApp extends StatelessWidget {
 
 ## ⚠️ Known Limitations
 
+- **Android 10 and below** — Not supported. `initialize()` skips silently without error.
 - **iOS** — Custom refresh rate selection is not supported. iOS automatically manages ProMotion.
-- **Android idle behavior** — Some OEM devices (e.g. Realme ColorOS) may drop to 60Hz when the app has no active rendering. This is OS-level adaptive behavior — the rate boosts back immediately on touch/scroll interaction.
-- **Comparison with `flutter_displaymode`** — Unlike `flutter_displaymode` which is Android-only and uses a single API call, SilkFPS supports both platforms, uses `DisplayManager.DisplayListener` for OS override detection, and includes additional features like FPS monitoring, battery saver, and adaptive scroll.
+- **Some OEM devices (e.g. Realme ColorOS)** — May drop to 60Hz when the app has no active UI rendering. This is OS-level adaptive behavior — the rate boosts back immediately on touch/scroll.
 
 ---
 

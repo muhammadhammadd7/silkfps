@@ -6,7 +6,8 @@ export 'src/silk_overlay.dart';
 export 'src/silk_adaptive.dart';
 
 /// SilkFPS — Silk smooth FPS boost for Flutter
-/// Android (Vulkan/Skia) + iOS (Metal/ProMotion)
+/// Android 11+ (API 30+) — Skia (API 30-32) + Impeller (API 33+)
+/// iOS — Metal + ProMotion
 ///
 /// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 /// QUICK START:
@@ -17,12 +18,6 @@ export 'src/silk_adaptive.dart';
 ///   await SilkFps.initialize(showFpsOverlay: true);
 ///   runApp(const MyApp());
 /// }
-///
-/// // Wrap your app
-/// home: SilkFpsOverlay(
-///   show: SilkFps.showFpsOverlay,
-///   child: MyHomePage(),
-/// )
 /// ```
 class SilkFps {
   static const MethodChannel _channel = MethodChannel('silkfps');
@@ -37,6 +32,12 @@ class SilkFps {
   // ─────────────────────────────────────────────────────────
   /// ONE TIME INITIALIZE — call once in main()
   ///
+  /// Automatically detects device capabilities:
+  /// - Android 10 and below → skips (not supported)
+  /// - Android 11-12L (API 30-32) → Skia renderer strategy
+  /// - Android 13+ (API 33+) → Impeller renderer strategy
+  /// - iOS → Metal + ProMotion (automatic)
+  ///
   /// [showFpsOverlay] — Live Hz + FPS badge in the corner
   /// [enableBatterySaver] — Auto switch to 60fps on low battery
   /// [batterySaverThreshold] — Battery % threshold (default 20)
@@ -50,7 +51,17 @@ class SilkFps {
 
     _showFpsOverlay = showFpsOverlay;
 
-    // Set the highest available refresh rate
+    // Cache device info first — needed for strategy decision
+    _cachedDeviceInfo = await getDeviceInfo();
+
+    // Check if device supports high refresh rate
+    if (!_cachedDeviceInfo!.isHighRefreshRateSupported) {
+      // Android 10 and below — skip silently
+      _initialized = true;
+      return;
+    }
+
+    // Set highest refresh rate based on device strategy
     await setHighRefreshRate();
 
     // Battery saver
@@ -58,16 +69,13 @@ class SilkFps {
       await SilkAdaptive.enableBatterySaver(threshold: batterySaverThreshold);
     }
 
-    // Cache device info
-    _cachedDeviceInfo = await getDeviceInfo();
-
     _initialized = true;
   }
 
   // ─────────────────────────────────────────────────────────
   /// Set the highest available refresh rate
-  /// Android: 90/120/144 Hz auto detect
-  /// iOS: Metal + ProMotion
+  /// Auto-detects: 60Hz, 90Hz, 120Hz, 144Hz
+  /// Android 11+ only — iOS handled by system
   // ─────────────────────────────────────────────────────────
   static Future<bool> setHighRefreshRate() async {
     try {
@@ -80,6 +88,7 @@ class SilkFps {
   // ─────────────────────────────────────────────────────────
   /// Set a custom refresh rate
   /// [rate] — in Hz (45, 60, 90, 120, 144)
+  /// Android 11+ only
   // ─────────────────────────────────────────────────────────
   static Future<bool> setRefreshRate(double rate) async {
     try {
@@ -154,6 +163,22 @@ class SilkFps {
     } catch (_) {
       return SilkDeviceInfo.fromMap({});
     }
+  }
+
+  // ─────────────────────────────────────────────────────────
+  /// Get the renderer strategy for this device
+  /// - "NOT_SUPPORTED" — Android 10 and below
+  /// - "SKIA"          — Android 11-12L
+  /// - "IMPELLER"      — Android 13+
+  /// - "Metal"         — iOS
+  // ─────────────────────────────────────────────────────────
+  static String get rendererStrategy {
+    return _cachedDeviceInfo?.rendererStrategy ?? 'UNKNOWN';
+  }
+
+  /// Whether this device supports high refresh rate via SilkFPS
+  static bool get isHighRefreshRateSupported {
+    return _cachedDeviceInfo?.isHighRefreshRateSupported ?? false;
   }
 }
 
