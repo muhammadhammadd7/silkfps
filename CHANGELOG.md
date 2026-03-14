@@ -1,3 +1,14 @@
+## 0.0.3
+
+* **Android — DisplayManager.DisplayListener added (production-grade approach)**
+  * OS refresh rate change → instantly detected → immediately re-applied
+  * Zero battery waste — event-driven, no polling loop
+  * Works on all devices: 60Hz, 90Hz, 120Hz, 144Hz — auto-detected
+  * Removed Surface.setFrameRate() monitor loop — replaced with DisplayListener
+  * Listener registered on `onAttachedToActivity`, unregistered on `onDetachedFromActivity`
+* **Android 14+ (API 34)** — `frameRateBoostOnTouchEnabled` added
+* Cleaned up codebase — removed experimental approaches
+
 ## 0.0.2
 
 * **Android — Surface.setFrameRate() API added**

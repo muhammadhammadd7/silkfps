@@ -5,7 +5,7 @@
 [![Platform](https://img.shields.io/badge/Platform-Android%20%7C%20iOS-blue.svg)](https://pub.dev/packages/silkfps)
 
 **Silk smooth FPS boost for Flutter apps.**  
-Auto-detects Vulkan/Skia on Android and Metal/ProMotion on iOS. Includes real-time FPS monitoring, battery saver mode, adaptive scroll mode, per-route FPS control, and a live FPS overlay badge.
+Auto-detects the highest supported refresh rate on Android (Vulkan/Skia) and iOS (Metal/ProMotion). Includes real-time FPS monitoring, battery saver mode, adaptive scroll mode, per-route FPS control, and a live FPS overlay badge.
 
 ---
 
@@ -34,6 +34,8 @@ Auto-detects Vulkan/Skia on Android and Metal/ProMotion on iOS. Includes real-ti
 | Feature | flutter_displaymode | **SilkFPS** |
 |---|---|---|
 | High refresh rate | ✅ Android only | ✅ Android + iOS |
+| Auto device detection | ❌ | ✅ 60/90/120/144Hz |
+| DisplayManager.DisplayListener | ❌ | ✅ |
 | Vulkan auto-detect | ❌ | ✅ |
 | iOS Metal/ProMotion | ❌ | ✅ |
 | Real-time FPS stream | ❌ | ✅ |
@@ -45,7 +47,6 @@ Auto-detects Vulkan/Skia on Android and Metal/ProMotion on iOS. Includes real-ti
 | FPS analytics | ❌ | ✅ |
 | Device info | ❌ | ✅ |
 | One-line initialize | ❌ | ✅ |
-| Surface.setFrameRate() | ❌ | ✅ |
 
 ---
 
@@ -53,25 +54,30 @@ Auto-detects Vulkan/Skia on Android and Metal/ProMotion on iOS. Includes real-ti
 
 | Platform | Support |
 |---|---|
-| Android (Snapdragon/Vulkan) | ✅ Full — Vulkan + 90/120/144Hz |
-| Android (OpenGLES/Impeller) | ✅ Surface.setFrameRate() fallback |
-| Android (MediaTek) | ✅ Skia fallback |
-| iOS (ProMotion) | ✅ Full — Metal + 120Hz |
-| iOS (Standard) | ✅ 60Hz |
+| Android 60Hz devices | ✅ Auto-detected — stays at 60Hz |
+| Android 90Hz devices | ✅ Auto-detected — boosts to 90Hz |
+| Android 120Hz devices | ✅ Auto-detected — boosts to 120Hz |
+| Android 144Hz devices | ✅ Auto-detected — boosts to 144Hz |
+| iOS (ProMotion 120Hz) | ✅ Full — Metal + ProMotion |
+| iOS (Standard 60Hz) | ✅ 60Hz |
 
 ---
 
-## 🔧 How It Works — 3-Level Approach
+## 🔧 How It Works
 
-SilkFPS uses a 3-level strategy to ensure maximum compatibility across all Android devices:
+SilkFPS uses `preferredDisplayModeId` + `DisplayManager.DisplayListener` for a clean, event-driven approach:
 
-| Level | API | Devices |
-|---|---|---|
-| **Level 1** — `preferredDisplayModeId` | Android 6+ (API 23+) | All devices |
-| **Level 2** — `Surface.setFrameRate()` | Android 11+ (API 30+) | OpenGLES + Vulkan |
-| **Level 3** — `frameRateBoostOnTouchEnabled` | Android 14+ (API 34+) | Modern flagships |
+1. **On app start** — detects the device's maximum supported refresh rate automatically
+2. **Sets `preferredDisplayModeId`** — tells the OS to use the highest available mode
+3. **Registers `DisplayListener`** — monitors for any OS-level rate changes in real time
+4. **If OS overrides** — listener fires instantly and re-applies the target rate
 
-> `Surface.setFrameRate()` works **outside the Flutter engine renderer** — it communicates directly with SurfaceFlinger. This is the same approach used by Binance, MEXC, and other major production apps to achieve stable high refresh rates regardless of whether the device uses Vulkan or OpenGLES.
+```
+App launch → detect max rate (60/90/120/144Hz) → set preferredDisplayModeId
+OS changes rate → DisplayListener fires instantly → re-apply target rate ✅
+```
+
+> This is an event-driven approach — zero polling, zero battery waste. The listener unregisters automatically when the activity detaches.
 
 ---
 
@@ -81,12 +87,10 @@ SilkFPS uses a 3-level strategy to ensure maximum compatibility across all Andro
 
 ```yaml
 dependencies:
-  silkfps: ^0.0.2
+  silkfps: ^0.0.3
 ```
 
 ### 2. Android — Update `build.gradle.kts`
-
-> ⚠️ **Important:** Update your app's `build.gradle.kts` for best compatibility.
 
 ```kotlin
 // android/app/build.gradle.kts
@@ -111,7 +115,7 @@ android {
 
 ### 3. Android — Update `MainActivity.kt`
 
-> ⚠️ **Important:** This step is required. After adding the plugin, you must update your app's `MainActivity.kt`.
+> ⚠️ **Important:** This step is required.
 
 ```kotlin
 // android/app/src/main/kotlin/your/package/MainActivity.kt
@@ -128,10 +132,7 @@ class MainActivity : FlutterActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Re-apply on every resume — prevents OS from resetting to 60Hz
         setOptimalRefreshRate()
-        window.decorView.postDelayed({ setOptimalRefreshRate() }, 300)
-        window.decorView.postDelayed({ setOptimalRefreshRate() }, 800)
     }
 
     private fun setOptimalRefreshRate() {
@@ -294,9 +295,9 @@ class _MyWidgetState extends State<MyWidget>
 
 ```dart
 SilkFpsOverlay(
-  show: true,                             // Show or hide the badge
-  position: SilkOverlayPosition.topRight, // Badge position on screen
-  setHz: 90,                              // Target rate shown in badge
+  show: true,
+  position: SilkOverlayPosition.topRight,
+  setHz: 90,
   child: MyWidget(),
 )
 ```
@@ -318,8 +319,8 @@ SilkAdaptive.disableBatterySaver();
 
 // Adaptive Scroll — high FPS while scrolling, low FPS when idle
 await SilkAdaptive.enableAdaptiveMode();
-await SilkAdaptive.onScrollStart(); // Boost FPS
-await SilkAdaptive.onScrollEnd();   // Drop FPS
+await SilkAdaptive.onScrollStart();
+await SilkAdaptive.onScrollEnd();
 SilkAdaptive.disableAdaptiveMode();
 
 // Lifecycle Aware — 60fps in background, 90fps in foreground
@@ -405,8 +406,8 @@ class MyApp extends StatelessWidget {
 ## ⚠️ Known Limitations
 
 - **iOS** — Custom refresh rate selection is not supported. iOS automatically manages ProMotion.
-- **Android idle behavior** — Some devices drop to 60Hz when the screen is idle to save battery. This is normal Android OS adaptive behavior — the refresh rate boosts back immediately on touch/scroll.
-- **Comparison with `flutter_displaymode`** — Unlike `flutter_displaymode` which is Android-only and uses a single API, SilkFPS supports both platforms with a 3-level approach for maximum device compatibility.
+- **Android idle behavior** — Some OEM devices (e.g. Realme ColorOS) may drop to 60Hz when the app has no active rendering. This is OS-level adaptive behavior — the rate boosts back immediately on touch/scroll interaction.
+- **Comparison with `flutter_displaymode`** — Unlike `flutter_displaymode` which is Android-only and uses a single API call, SilkFPS supports both platforms, uses `DisplayManager.DisplayListener` for OS override detection, and includes additional features like FPS monitoring, battery saver, and adaptive scroll.
 
 ---
 
