@@ -1,9 +1,9 @@
 name: silkfps
 description: "Silk smooth FPS boost for Flutter. Auto-detects Vulkan/Skia on Android and Metal/ProMotion on iOS with real-time FPS monitoring, battery saver, and live FPS overlay."
-version: 0.0.4
-homepage: https://github.com/muhammadhammad7/silkfps
-repository: https://github.com/muhammadhammad7/silkfps
-issue_tracker: https://github.com/muhammadhammad7/silkfps/issues
+version: 0.0.5
+homepage: https://github.com/muhammadhammadd7/silkfps
+repository: https://github.com/muhammadhammadd7/silkfps
+issue_tracker: https://github.com/muhammadhammadd7/silkfps/issues
 
 topics:
   - fps

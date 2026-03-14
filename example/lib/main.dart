@@ -32,7 +32,7 @@ class SilkFpsHomePage extends StatefulWidget {
 }
 
 class _SilkFpsHomePageState extends State<SilkFpsHomePage> {
-  double _selectedFps = 0; // Jo button selected hai — badge mein yahi dikhao
+  double _selectedFps = 0;
   List<double> _supportedRates = [];
   bool _isVulkan = false;
   SilkDeviceInfo? _deviceInfo;
@@ -52,7 +52,7 @@ class _SilkFpsHomePageState extends State<SilkFpsHomePage> {
     final info = await SilkFps.getDeviceInfo();
     final maxRate = supported.isNotEmpty ? supported.last : 60.0;
     setState(() {
-      _selectedFps = maxRate; // Default max rate
+      _selectedFps = maxRate;
       _supportedRates = supported;
       _isVulkan = vulkan;
       _deviceInfo = info;
@@ -85,15 +85,25 @@ class _SilkFpsHomePageState extends State<SilkFpsHomePage> {
     return const Color(0xFFF44336);
   }
 
+  Color get _strategyColor {
+    switch (_deviceInfo?.rendererStrategy) {
+      case 'IMPELLER':
+        return const Color(0xFF4CAF50);
+      case 'SKIA':
+        return const Color(0xFF6C63FF);
+      default:
+        return Colors.white54;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF0F0F1A),
-      // ✅ SilkFpsOverlay — selected rate pass karo
       body: SilkFpsOverlay(
         show: SilkFps.showFpsOverlay,
         position: SilkOverlayPosition.topRight,
-        setHz: _selectedFps, // ← Yahi badge mein dikhega
+        // setHz not passed — shows REAL actual Hz from device ✅
         child: SafeArea(
           child: _loading
               ? const Center(
@@ -170,6 +180,29 @@ class _SilkFpsHomePageState extends State<SilkFpsHomePage> {
                                 ),
                               ),
                             ),
+                            const SizedBox(height: 8),
+                            if (_deviceInfo != null)
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 4,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: _strategyColor.withOpacity(0.15),
+                                  borderRadius: BorderRadius.circular(20),
+                                  border: Border.all(
+                                    color: _strategyColor.withOpacity(0.4),
+                                  ),
+                                ),
+                                child: Text(
+                                  '📱 ${_deviceInfo!.rendererStrategy} Strategy',
+                                  style: TextStyle(
+                                    color: _strategyColor,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
                           ],
                         ),
                       ),
@@ -252,11 +285,16 @@ class _SilkFpsHomePageState extends State<SilkFpsHomePage> {
                               _row('Model', _deviceInfo!.model),
                               _row('OS Version', _deviceInfo!.osVersion),
                               _row('Renderer', _deviceInfo!.renderer),
+                              _row('Strategy', _deviceInfo!.rendererStrategy),
                               _row(
                                 'Vulkan',
                                 '${_deviceInfo!.isVulkanSupported}',
                               ),
                               _row('ProMotion', '${_deviceInfo!.isProMotion}'),
+                              _row(
+                                'High FPS Supported',
+                                '${_deviceInfo!.isHighRefreshRateSupported}',
+                              ),
                               _row(
                                 'Max FPS',
                                 '${_deviceInfo!.maxRefreshRate.toStringAsFixed(0)} Hz',

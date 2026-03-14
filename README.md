@@ -12,12 +12,12 @@ Auto-detects the highest supported refresh rate on Android (Vulkan/Skia) and iOS
 ## 📸 Screenshots
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/muhammadhammadd7/silkfps/main/assets/images/screenshot_60hz.jpeg" width="45%" alt="SilkFPS — 60Hz default" />
+  <img src="https://raw.githubusercontent.com/muhammadhammadd7/silkfps/main/assets/images/screenshot_60hz.jpeg" width="45%" alt="SilkFPS — 60Hz" />
   &nbsp;&nbsp;
   <img src="https://raw.githubusercontent.com/muhammadhammadd7/silkfps/main/assets/images/screenshot_90hz.jpeg" width="45%" alt="SilkFPS — 90Hz boosted" />
 </p>
 <p align="center">
-  <em>Left: Default 60Hz &nbsp;|&nbsp; Right: SilkFPS boosted to 90Hz ⚡</em>
+  <em>Left: 60Hz (orange badge) &nbsp;|&nbsp; Right: SilkFPS boosted to 90Hz (green badge) ⚡</em>
 </p>
 
 <p align="center">
@@ -36,6 +36,7 @@ Auto-detects the highest supported refresh rate on Android (Vulkan/Skia) and iOS
 | High refresh rate | ✅ Android only | ✅ Android + iOS |
 | Auto device detection | ❌ | ✅ 60/90/120/144Hz |
 | DisplayManager.DisplayListener | ❌ | ✅ |
+| Real-time Hz stream (EventChannel) | ❌ | ✅ |
 | Renderer strategy detection | ❌ | ✅ SKIA / IMPELLER |
 | Vulkan auto-detect | ❌ | ✅ |
 | iOS Metal/ProMotion | ❌ | ✅ |
@@ -55,10 +56,10 @@ Auto-detects the highest supported refresh rate on Android (Vulkan/Skia) and iOS
 
 | Platform | Support |
 |---|---|
-| Android 60Hz devices (API 30+) | ✅ Auto-detected |
-| Android 90Hz devices (API 30+) | ✅ Auto-detected |
-| Android 120Hz devices (API 30+) | ✅ Auto-detected |
-| Android 144Hz devices (API 30+) | ✅ Auto-detected |
+| Android 60Hz (API 30+) | ✅ Auto-detected |
+| Android 90Hz (API 30+) | ✅ Auto-detected |
+| Android 120Hz (API 30+) | ✅ Auto-detected |
+| Android 144Hz (API 30+) | ✅ Auto-detected |
 | Android 10 and below (API < 30) | ⚠️ Not supported — skips silently |
 | iOS (ProMotion 120Hz) | ✅ Full — Metal + ProMotion |
 | iOS (Standard 60Hz) | ✅ 60Hz |
@@ -67,7 +68,7 @@ Auto-detects the highest supported refresh rate on Android (Vulkan/Skia) and iOS
 
 ## 🔧 How It Works
 
-SilkFPS uses `preferredDisplayModeId` + `DisplayManager.DisplayListener` with automatic renderer strategy detection:
+SilkFPS uses a combination of `preferredDisplayModeId`, `DisplayManager.DisplayListener`, and `EventChannel` for a clean, event-driven architecture:
 
 | Android Version | API | Strategy | Renderer |
 |---|---|---|---|
@@ -78,13 +79,12 @@ SilkFPS uses `preferredDisplayModeId` + `DisplayManager.DisplayListener` with au
 
 **Flow:**
 ```
-App launch → detect API level → select strategy
-         → detect max rate (60/90/120/144Hz)
-         → set preferredDisplayModeId
-OS changes rate → DisplayListener fires instantly → re-apply ✅
+App launch → detect API level + max Hz → set preferredDisplayModeId
+OS changes Hz → DisplayListener fires → re-apply + push to EventChannel
+SilkFpsOverlay → receives Hz via stream → badge updates instantly ✅
 ```
 
-> Event-driven approach — zero polling, zero battery waste.
+> Fully event-driven — zero polling, zero battery waste.
 
 ---
 
@@ -94,7 +94,7 @@ OS changes rate → DisplayListener fires instantly → re-apply ✅
 
 ```yaml
 dependencies:
-  silkfps: ^0.0.4
+  silkfps: ^0.0.5
 ```
 
 ### 2. Android — Update `build.gradle.kts`
@@ -102,16 +102,13 @@ dependencies:
 ```kotlin
 android {
     compileSdk = 36
-
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-
     kotlinOptions {
         jvmTarget = JavaVersion.VERSION_17.toString()
     }
-
     defaultConfig {
         targetSdk = 36
     }
@@ -203,19 +200,19 @@ void main() async {
 ### 7. Wrap your app — FPS Overlay
 
 ```dart
-class MyApp extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      home: SilkFpsOverlay(
-        show: SilkFps.showFpsOverlay,
-        position: SilkOverlayPosition.topRight,
-        setHz: 90,
-        child: const MyHomePage(),
-      ),
-    );
-  }
-}
+// setHz not needed — auto real-time Hz ✅
+SilkFpsOverlay(
+  show: SilkFps.showFpsOverlay,
+  position: SilkOverlayPosition.topRight,
+  child: const MyHomePage(),
+)
+
+// Or manual override
+SilkFpsOverlay(
+  show: SilkFps.showFpsOverlay,
+  setHz: 90, // optional
+  child: const MyHomePage(),
+)
 ```
 
 ---
@@ -225,95 +222,80 @@ class MyApp extends StatelessWidget {
 ### `SilkFps` — Main Class
 
 ```dart
-// Initialize — call once in main()
 await SilkFps.initialize(
   showFpsOverlay: false,
   enableBatterySaver: false,
   batterySaverThreshold: 20,
 );
 
-// Set the highest available refresh rate
 await SilkFps.setHighRefreshRate();
-
-// Set a specific refresh rate
 await SilkFps.setRefreshRate(90.0);
-
-// Get the current refresh rate
 double hz = await SilkFps.getCurrentRefreshRate();
-
-// Get all supported refresh rates
 List<double> rates = await SilkFps.getSupportedRefreshRates();
-
-// Check Vulkan support (Android only)
 bool vulkan = await SilkFps.isVulkanSupported();
-
-// Get battery level
 int battery = await SilkFps.getBatteryLevel();
-
-// Get device info
 SilkDeviceInfo info = await SilkFps.getDeviceInfo();
 
-// New in 0.0.4
-print(SilkFps.rendererStrategy);           // "SKIA" / "IMPELLER" / "NOT_SUPPORTED"
+// v0.0.4+
+print(SilkFps.rendererStrategy);           // "SKIA" / "IMPELLER"
 print(SilkFps.isHighRefreshRateSupported); // true / false
 ```
 
 ---
 
-### `SilkDeviceInfo` — Device Information Model
+### `SilkDeviceInfo` — Device Information
 
 ```dart
 SilkDeviceInfo info = await SilkFps.getDeviceInfo();
 
-info.manufacturer               // "realme", "Samsung", "Apple"
-info.model                      // "RMX2001", "S24", "iPhone 15 Pro"
-info.osVersion                  // "11", "14", "17.0"
-info.apiLevel                   // 30 (Android only)
-info.isVulkanSupported          // true/false (Android)
-info.isMetalSupported           // true/false (iOS)
-info.isProMotion                // true if 120Hz+ (iPhone 13 Pro+)
-info.maxRefreshRate             // 90.0, 120.0, 144.0
-info.currentRefreshRate         // Current Hz
+info.manufacturer               // "Google", "Samsung", "Apple"
+info.model                      // "Pixel 7a", "S24", "iPhone 15 Pro"
+info.osVersion                  // "14", "16", "17.0"
+info.apiLevel                   // 36
+info.isVulkanSupported          // true
+info.isMetalSupported           // false (iOS only)
+info.isProMotion                // true if 120Hz+ iPhone
+info.maxRefreshRate             // 90.0
+info.currentRefreshRate         // 90.0
 info.supportedRefreshRates      // [60.0, 90.0]
-info.renderer                   // "Vulkan", "Skia", "Metal"
-info.rendererStrategy           // "SKIA", "IMPELLER", "NOT_SUPPORTED", "Metal"
-info.isHighRefreshRateSupported // true if Android 11+ or iOS
+info.renderer                   // "Vulkan"
+info.rendererStrategy           // "IMPELLER"
+info.isHighRefreshRateSupported // true
 ```
 
 ---
 
-### `SilkFpsMonitor` — Real-time FPS Stream
-
-```dart
-SilkFpsMonitor.start(this);
-SilkFpsMonitor.fpsStream.listen((fps) {
-  print('Live FPS: $fps');
-});
-SilkFpsMonitor.stop();
-```
-
----
-
-### `SilkFpsOverlay` — Live FPS Badge Widget
+### `SilkFpsOverlay` — Live Badge Widget
 
 ```dart
 SilkFpsOverlay(
   show: true,
   position: SilkOverlayPosition.topRight,
-  setHz: 90,
+  // setHz optional — null = real-time actual Hz ✅
   child: MyWidget(),
 )
 ```
 
-**Available Positions:**
-- `SilkOverlayPosition.topLeft`
-- `SilkOverlayPosition.topRight`
-- `SilkOverlayPosition.bottomLeft`
-- `SilkOverlayPosition.bottomRight`
+**Badge colors:**
+- 🟢 Green — 90Hz and above
+- 🟠 Orange — 60Hz
+- 🔴 Red — below 60Hz
+
+**Positions:** `topLeft` | `topRight` | `bottomLeft` | `bottomRight`
 
 ---
 
-### `SilkAdaptive` — Smart FPS Management
+### `SilkFpsMonitor` — FPS Stream
+
+```dart
+SilkFpsMonitor.start(this);
+SilkFpsMonitor.fpsStream.listen((fps) => print('FPS: $fps'));
+SilkFpsMonitor.stop();
+```
+
+---
+
+### `SilkAdaptive` — Smart Management
 
 ```dart
 await SilkAdaptive.enableBatterySaver(threshold: 20);
@@ -354,7 +336,6 @@ class MyApp extends StatelessWidget {
       home: SilkFpsOverlay(
         show: SilkFps.showFpsOverlay,
         position: SilkOverlayPosition.topRight,
-        setHz: 90,
         child: const HomePage(),
       ),
     );
@@ -366,9 +347,9 @@ class MyApp extends StatelessWidget {
 
 ## ⚠️ Known Limitations
 
-- **Android 10 and below** — Not supported. `initialize()` skips silently without error.
-- **iOS** — Custom refresh rate selection is not supported. iOS automatically manages ProMotion.
-- **Some OEM devices (e.g. Realme ColorOS)** — May drop to 60Hz when the app has no active UI rendering. This is OS-level adaptive behavior — the rate boosts back immediately on touch/scroll.
+- **Android 10 and below** — Not supported. `initialize()` skips silently.
+- **iOS** — Custom refresh rate selection not supported. iOS manages ProMotion automatically.
+- **Some OEM devices (e.g. Realme ColorOS)** — May drop to 60Hz when app has no active rendering. Rate boosts back immediately on touch/scroll.
 
 ---
 
@@ -402,19 +383,17 @@ SOFTWARE.
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
-
 1. Fork the repo
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
+2. Create feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit (`git commit -m 'Add AmazingFeature'`)
+4. Push (`git push origin feature/AmazingFeature`)
 5. Open a Pull Request
 
 ---
 
 ## 📬 Issues
 
-Found a bug? Please open an issue on [GitHub](https://github.com/muhammadhammad7/silkfps/issues).
+Found a bug? Open an issue on [GitHub](https://github.com/muhammadhammadd7/silkfps/issues).
 
 ---
 

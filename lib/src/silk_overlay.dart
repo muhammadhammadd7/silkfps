@@ -1,22 +1,24 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'silk_fps_monitor.dart';
 
 /// FPS Overlay Badge
-/// [setHz] — Pass the refresh rate that has been set
-/// [show] — Whether to show or hide the overlay
+/// [setHz] — Optional. If null, shows REAL-TIME actual Hz from device.
+///           Uses EventChannel — no polling, zero battery waste.
+/// [show]  — Whether to show or hide the overlay
 class SilkFpsOverlay extends StatefulWidget {
   final Widget child;
   final SilkOverlayPosition position;
   final bool show;
-  final double? setHz; // Pass from outside — the selected refresh rate
+  final double? setHz; // Optional — null = real-time Hz via EventChannel
 
   const SilkFpsOverlay({
     super.key,
     required this.child,
     this.position = SilkOverlayPosition.topRight,
     this.show = true,
-    this.setHz, // Optional — shows max rate if null
+    this.setHz,
   });
 
   @override
@@ -25,26 +27,43 @@ class SilkFpsOverlay extends StatefulWidget {
 
 class _SilkFpsOverlayState extends State<SilkFpsOverlay>
     with TickerProviderStateMixin {
+  // EventChannel — real-time Hz stream from native DisplayListener
+  static const _hzStream = EventChannel('silkfps/hz_stream');
+
   double _flutterFps = 0;
+  double _actualHz = 0;
   StreamSubscription<double>? _fpsSub;
+  StreamSubscription<dynamic>? _hzSub;
 
   @override
   void initState() {
     super.initState();
     if (widget.show) {
+      // Flutter FPS monitor
       SilkFpsMonitor.start(this);
       _fpsSub = SilkFpsMonitor.fpsStream.listen((fps) {
         if (mounted) setState(() => _flutterFps = fps);
       });
+
+      // Real-time Hz — only subscribe if setHz not provided
+      // EventChannel fires only when OS changes Hz — zero polling ✅
+      if (widget.setHz == null) {
+        _hzSub = _hzStream.receiveBroadcastStream().cast<double>().listen((hz) {
+          if (mounted && hz > 0) setState(() => _actualHz = hz);
+        });
+      }
     }
   }
 
   @override
   void dispose() {
     _fpsSub?.cancel();
+    _hzSub?.cancel();
     SilkFpsMonitor.stop();
     super.dispose();
   }
+
+  double get _displayHz => widget.setHz ?? _actualHz;
 
   Color _hzColor(double hz) {
     if (hz >= 90) return const Color(0xFF4CAF50);
@@ -60,8 +79,6 @@ class _SilkFpsOverlayState extends State<SilkFpsOverlay>
 
   @override
   Widget build(BuildContext context) {
-    final hz = widget.setHz ?? 0;
-
     return Stack(
       children: [
         widget.child,
@@ -76,10 +93,10 @@ class _SilkFpsOverlayState extends State<SilkFpsOverlay>
                   ? CrossAxisAlignment.start
                   : CrossAxisAlignment.end,
               children: [
-                if (hz > 0)
+                if (_displayHz > 0)
                   _Badge(
-                    label: '${hz.toStringAsFixed(0)} Hz',
-                    color: _hzColor(hz),
+                    label: '${_displayHz.toStringAsFixed(0)} Hz',
+                    color: _hzColor(_displayHz),
                   ),
                 const SizedBox(height: 4),
                 if (_flutterFps > 0)
