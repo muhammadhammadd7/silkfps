@@ -12,16 +12,16 @@ Auto-detects the highest supported refresh rate on Android (Vulkan/Skia) and iOS
 ## 📸 Screenshots
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/muhammadhammad7/silkfps/main/assets/images/screenshot_60hz.jpeg" width="45%" alt="SilkFPS — 60Hz default" />
+  <img src="https://raw.githubusercontent.com/muhammadhammadd7/silkfps/main/assets/images/screenshot_60hz.jpeg" width="45%" alt="SilkFPS — 60Hz default" />
   &nbsp;&nbsp;
-  <img src="https://raw.githubusercontent.com/muhammadhammad7/silkfps/main/assets/images/screenshot_90hz.jpeg" width="45%" alt="SilkFPS — 90Hz boosted" />
+  <img src="https://raw.githubusercontent.com/muhammadhammadd7/silkfps/main/assets/images/screenshot_90hz.jpeg" width="45%" alt="SilkFPS — 90Hz boosted" />
 </p>
 <p align="center">
   <em>Left: Default 60Hz &nbsp;|&nbsp; Right: SilkFPS boosted to 90Hz ⚡</em>
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/muhammadhammad7/silkfps/main/assets/images/terminal_output.png" width="90%" alt="adb logcat confirming 90Hz" />
+  <img src="https://raw.githubusercontent.com/muhammadhammadd7/silkfps/main/assets/images/terminal_output.png" width="90%" alt="adb logcat confirming 90Hz" />
 </p>
 <p align="center">
   <em>adb logcat confirming <code>appRequestRefreshRateRange=[90 90]</code> — plugin working ✅</em>
