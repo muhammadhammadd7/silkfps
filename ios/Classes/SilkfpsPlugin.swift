@@ -3,10 +3,23 @@ import UIKit
 
 public class SilkfpsPlugin: NSObject, FlutterPlugin {
 
+    private var eventSink: FlutterEventSink?
+
     public static func register(with registrar: FlutterPluginRegistrar) {
-        let channel = FlutterMethodChannel(name: "silkfps", binaryMessenger: registrar.messenger())
+        // MethodChannel
+        let channel = FlutterMethodChannel(
+            name: "silkfps",
+            binaryMessenger: registrar.messenger()
+        )
         let instance = SilkfpsPlugin()
         registrar.addMethodCallDelegate(instance, channel: channel)
+
+        // EventChannel — real-time Hz stream (iOS manages ProMotion automatically)
+        let eventChannel = FlutterEventChannel(
+            name: "silkfps/hz_stream",
+            binaryMessenger: registrar.messenger()
+        )
+        eventChannel.setStreamHandler(instance)
     }
 
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
@@ -17,7 +30,8 @@ public class SilkfpsPlugin: NSObject, FlutterPlugin {
             result(true)
 
         case "setRefreshRate":
-            setHighRefreshRate() // iOS does not support custom refresh rate selection
+            // iOS does not support custom refresh rate selection
+            setHighRefreshRate()
             result(true)
 
         case "getCurrentRefreshRate":
@@ -43,7 +57,9 @@ public class SilkfpsPlugin: NSObject, FlutterPlugin {
                 "maxRefreshRate": getMaxRefreshRate(),
                 "currentRefreshRate": getCurrentRefreshRate(),
                 "supportedRefreshRates": getSupportedRefreshRates(),
-                "batteryLevel": getBatteryLevel()
+                "batteryLevel": getBatteryLevel(),
+                "rendererStrategy": "Metal",
+                "isHighRefreshRateSupported": true
             ]
             result(info)
 
@@ -100,5 +116,26 @@ public class SilkfpsPlugin: NSObject, FlutterPlugin {
             guard let value = element.value as? Int8, value != 0 else { return identifier }
             return identifier + String(UnicodeScalar(UInt8(value)))
         }
+    }
+}
+
+// ─────────────────────────────────────────────────────────
+// EventChannel StreamHandler — real-time Hz stream for iOS
+// iOS manages ProMotion automatically — sends current Hz once on listen
+// ─────────────────────────────────────────────────────────
+extension SilkfpsPlugin: FlutterStreamHandler {
+    public func onListen(
+        withArguments arguments: Any?,
+        eventSink events: @escaping FlutterEventSink
+    ) -> FlutterError? {
+        self.eventSink = events
+        // Send current Hz immediately on subscribe
+        events(getCurrentRefreshRate())
+        return nil
+    }
+
+    public func onCancel(withArguments arguments: Any?) -> FlutterError? {
+        self.eventSink = nil
+        return nil
     }
 }
