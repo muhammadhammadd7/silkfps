@@ -94,7 +94,7 @@ SilkFpsOverlay → receives Hz via stream → badge updates instantly ✅
 
 ```yaml
 dependencies:
-  silkfps: ^0.0.5
+  silkfps: ^0.0.6
 ```
 
 ### 2. Android — Update `build.gradle.kts`
@@ -236,8 +236,7 @@ bool vulkan = await SilkFps.isVulkanSupported();
 int battery = await SilkFps.getBatteryLevel();
 SilkDeviceInfo info = await SilkFps.getDeviceInfo();
 
-// v0.0.4+
-print(SilkFps.rendererStrategy);           // "SKIA" / "IMPELLER"
+print(SilkFps.rendererStrategy);           // "SKIA" / "IMPELLER" / "Metal"
 print(SilkFps.isHighRefreshRateSupported); // true / false
 ```
 
@@ -258,8 +257,8 @@ info.isProMotion                // true if 120Hz+ iPhone
 info.maxRefreshRate             // 90.0
 info.currentRefreshRate         // 90.0
 info.supportedRefreshRates      // [60.0, 90.0]
-info.renderer                   // "Vulkan"
-info.rendererStrategy           // "IMPELLER"
+info.renderer                   // "Vulkan" / "Skia" / "Metal"
+info.rendererStrategy           // "SKIA" / "IMPELLER" / "Metal"
 info.isHighRefreshRateSupported // true
 ```
 

@@ -1,3 +1,11 @@
+## 0.0.6
+
+* **iOS — EventChannel support added**
+  * Fixed `MissingPluginException` on iOS — `silkfps/hz_stream` was not implemented
+  * `SilkfpsPlugin.swift` now implements `FlutterStreamHandler`
+  * Sends current Hz immediately on stream subscribe
+  * `rendererStrategy` and `isHighRefreshRateSupported` added to iOS `getDeviceInfo`
+
 ## 0.0.5
 
 * **EventChannel — Real-time Hz stream added**
